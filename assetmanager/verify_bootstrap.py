@@ -1,4 +1,26 @@
 #!/usr/bin/env python
+"""
+Neo4j Generative AI GCP Bootstrap Verification Script
+
+This script verifies that all required GCP resources and configurations
+are in place for the Neo4j Generative AI solution.
+
+Key features:
+- Verifies GCP project access and enabled APIs
+- Checks for required service accounts and their roles
+- Validates storage bucket existence and accessibility
+- Tests Vertex AI connectivity using the google-genai SDK
+- Verifies Neo4j Aura database connectivity
+- Produces a detailed JSON report of all verification results
+
+Recent fixes:
+- Updated Vertex AI client initialization to use vertexai=True with project and location
+- Simplified model generation call to use the latest API format
+- Fixed GCP CLI command format issues by removing single quotes around format parameters
+- Improved service account verification to use list filtering instead of direct describe
+- Enhanced logging functions to handle Unicode encoding errors gracefully
+- Added proper environment variable handling for Vertex AI-specific variables
+"""
 
 import os
 import json
@@ -28,15 +50,24 @@ def log_info(message):
 
 def log_success(message):
     """Print success message with clear formatting"""
-    print(f"✓ {message}")
+    try:
+        print(f"✓ {message}")
+    except UnicodeEncodeError:
+        print(f"[SUCCESS] {message}")
 
 def log_warning(message):
     """Print warning message with clear formatting"""
-    print(f"⚠ {message}")
+    try:
+        print(f"⚠ {message}")
+    except UnicodeEncodeError:
+        print(f"[WARNING] {message}")
 
 def log_error(message):
     """Print error message with clear formatting and add to results"""
-    print(f"✗ {message}")
+    try:
+        print(f"✗ {message}")
+    except UnicodeEncodeError:
+        print(f"[ERROR] {message}")
     results["errors"].append(message)
     
 def run_command(cmd, capture_output=True):
@@ -130,7 +161,7 @@ required_apis = [
 enabled_apis = []
 try:
     # Get all enabled services in one call - more reliable
-    cmd = f"gcloud services list --project={GCP_PROJECT_ID} --format='value(config.name)'"
+    cmd = f"gcloud services list --project={GCP_PROJECT_ID} --format=value(config.name)"
     all_services = run_command(cmd)
     if all_services:
         all_services_list = all_services.splitlines()
@@ -229,11 +260,12 @@ service_account_email = f"{service_account_name}@{GCP_PROJECT_ID}.iam.gserviceac
 results["service_account"]["email"] = service_account_email
 
 try:
-    # Check if service account exists
-    sa_exists = run_command(
-        f"gcloud iam service-accounts describe {service_account_email} "
-        f"--project={GCP_PROJECT_ID} --format='value(email)' 2>/dev/null"
+    # Check if service account exists - use list instead of describe
+    sa_list = run_command(
+        f"gcloud iam service-accounts list --filter=email:{service_account_email} "
+        f"--project={GCP_PROJECT_ID} --format=value(email)"
     )
+    sa_exists = sa_list if sa_list else None
     
     if sa_exists and service_account_email in sa_exists:
         log_success(f"Service account {service_account_email} exists")

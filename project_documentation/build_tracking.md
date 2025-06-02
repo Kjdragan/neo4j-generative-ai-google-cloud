@@ -73,6 +73,18 @@
 
 4.  **Pipeline Entry Point (`main.py`):**
     *   Created `assetmanager/src/document_pipeline/main.py` to serve as a command-line interface for the document processing pipeline.
+
+5.  **Bootstrap Verification Script (`verify_bootstrap.py`):**
+    *   Fixed Vertex AI client initialization to use the modern `google-genai` Python SDK approach with `genai.Client(vertexai=True, project=..., location=...)`.
+    *   Simplified model generation call to `client.models.generate_content(model=LLM_MODEL, contents=prompt)` as per the latest official example.
+    *   Removed unsupported parameters like `generation_config` that caused runtime errors.
+    *   Added robust error handling and logging for model generation.
+    *   Enhanced logging functions to handle Unicode encoding errors gracefully.
+    *   Fixed GCP CLI command format issues by removing single quotes around format parameters.
+    *   Improved service account verification to use list filtering instead of direct describe commands.
+    *   Added support for both API key and project-based authentication.
+    *   Added proper environment variable handling for Vertex AI-specific variables.
+    *   Added detailed bucket metadata logging and Neo4j connection verification.
     *   The script handles environment variable loading (from `.env` in `assetmanager/`), command-line argument parsing (for file path and configuration overrides), `DocumentProcessor` initialization, and invoking the document processing logic.
     *   Includes basic logging and error handling for common issues like missing configuration or file not found.
 
