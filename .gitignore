@@ -97,4 +97,5 @@ nosetests.xml
 # Compiled output
 *.o
 *.out
-C:\Users\kevin\repos\neo4j-generative-ai-google-cloud\uv.lock
+uv.lock
+setup_gcp_project.ps1

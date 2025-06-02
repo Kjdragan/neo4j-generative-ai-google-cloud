@@ -86,6 +86,21 @@
     *   Added proper environment variable handling for Vertex AI-specific variables.
     *   Added detailed bucket metadata logging and Neo4j connection verification.
     *   The script handles environment variable loading (from `.env` in `assetmanager/`), command-line argument parsing (for file path and configuration overrides), `DocumentProcessor` initialization, and invoking the document processing logic.
+
+6.  **Vertex AI Connection Approach:**
+    *   **Correct Client Initialization:** The working approach uses `genai.Client(vertexai=True, project=VERTEX_PROJECT_ID, location=VERTEX_LOCATION)` to properly initialize the Vertex AI client.
+    *   **Simplified Model Generation:** The correct approach uses `client.models.generate_content(model=LLM_MODEL, contents=prompt)` without any generation_config parameters that caused errors.
+    *   **Environment Variables:** The solution requires proper environment variables in `.env` including `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, and `VERTEX_MODEL_REGION`.
+    *   **API Key Handling:** The solution supports both API key authentication (via `GOOGLE_API_KEY`) and project-based authentication through GCP credentials.
+    *   **Error Handling:** Added robust error handling for model generation with proper exception catching and logging.
+
+7.  **Neo4j Connection Approach:**
+    *   **Direct Environment Variable Loading:** The working approach loads Neo4j connection details directly from `.env` file using `dotenv_values()` instead of relying on environment variables.
+    *   **DNS Resolution Check:** Added DNS resolution verification for Neo4j hostname before attempting connection to provide better diagnostics.
+    *   **Secure Connection String:** Uses the proper `neo4j+s://` protocol format for secure connections to Neo4j Aura.
+    *   **Connection Verification:** Performs a simple RETURN 1 query to verify actual database connectivity beyond just driver initialization.
+    *   **Vector Index Check:** Added verification for vector indexes to ensure embedding search readiness.
+    *   **Sensitive Information Masking:** Implemented masking of sensitive connection details in logs for security.
     *   Includes basic logging and error handling for common issues like missing configuration or file not found.
 
 **Next Steps (Setup & Initial Test):**
