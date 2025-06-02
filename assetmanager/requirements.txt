@@ -1,0 +1,6 @@
+google-cloud-documentai
+google-cloud-storage
+google-generativeai
+neo4j
+beautifulsoup4
+python-dotenv

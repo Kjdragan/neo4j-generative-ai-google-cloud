@@ -1,118 +1,275 @@
-# neo4j-generative-ai-google-cloud
-This is a sample notebook and web application which shows how Google Cloud Vertex AI can be used with Neo4j. We will explore how to leverage generative AI to build and consume a knowledge graph in Neo4j.
+# Neo4j Generative AI with Google Cloud (Updated)
 
-The dataset we're using is from the SEC's EDGAR system.  It was downloaded using [these scripts](https://github.com/neo4j-partners/neo4j-sec-edgar-form13).
+## 🔥 Now with Gemini 2.5 Pro Preview Support!
+
+This project demonstrates how to use Google Cloud's Vertex AI Gemini models with Neo4j to build and query a knowledge graph. The modernized implementation uses the latest **Gemini 2.5 Pro Preview** models for all LLM tasks and the latest Gemini embedding models for vector search capabilities, powered by the new **Google GenAI SDK**.
+
+The dataset comes from the SEC's EDGAR system, specifically Form-13 filings, which were downloaded using [these scripts](https://github.com/neo4j-partners/neo4j-sec-edgar-form13).
 
 The dataflow in this demo consists of two parts:
-1. Ingestion - we read the EDGAR files with VertexAI, extracting entities and relationships from them which is then ingested into a Neo4j database deployed from [GCP Marketplace](https://console.cloud.google.com/marketplace/browse?filter=partner:Neo4j)
-2. Consumption - A user inputs natural language into a chat UI.  Vertex AI GenAI converts that to Neo4j Cypher which is run against the database.  This flow allows non technical users to query the database.
+1. **Ingestion** - We process EDGAR files with Google Cloud Vertex AI Gemini models, extracting entities and relationships which are then ingested into a Neo4j AuraDB instance
+2. **Consumption** - Users interact with a modern chat UI built with Streamlit. Natural language queries are converted to Neo4j Cypher using Gemini Pro 2.5, allowing non-technical users to query the knowledge graph
 
-## Setup VertexAI Workbench
-To get started setting up the demo, clone this repo into a VertexAI Workbench environment and then run through the notebooks numbered 1 and 2.
-Create a [managed notebook](https://console.cloud.google.com/vertex-ai/workbench/managed) in Google Cloud Vertex AI.  Be sure to select "single user" when starting a managed notebook to run this, otherwise the auth won't allow access to the preview.
+## Project Structure
 
-Once that has started, open the notebook and a terminal window within that.  Clone this repo with the command:
+The project has been modernized with a Python-based implementation that replaces the previous notebooks:
+
+```
+/assetmanager
+  /src                      # Source code directory
+    /api                    # API endpoints for integration
+    /data_processing        # Data processing modules
+    /models                 # Model implementations
+    /ui                     # Streamlit UI components
+    /utils                  # Utility modules
+    main.py                 # Main entry point
+  pyproject.toml           # Project dependencies
+  README.md                # This file
+/setup_gcp_project.ps1     # GCP project bootstrap script
+```
+
+Once that has started, open the notebook and a terminal window within that.
+Clone this repo with the command:
 
     git clone https://github.com/neo4j-partners/neo4j-generative-ai-google-cloud.git
 
-## Deploy Neo4j AuraDS Professional
-This demo requires a Neo4j instance.  You can deploy that using the GCP Marketplace listing [here](https://console.cloud.google.com/marketplace/browse?filter=partner:Neo4j)
+Feedback submitted Generating.
 
-## Enable VertexAI API and GenAI Models
-This demo uses multiple GenAI Models inside the Vertex GenAI Model Garden. Please ensure that you have access to these Models:
-- Text Embedding Gecko
-- Gemini Pro 1.5
-- Anthropic Claude Opus or Sonnet V3
+## Setting Up Your Environment
 
-## UI
-The UI application is based on Streamlit. In this example we're going to show how to run it on a [Google Compute Engine (GCE)](https://console.cloud.google.com/compute/instances) VM.  First, deploy a VM. You need to replace your environment specific values in the command below:
+### 1. Bootstrap a New GCP Project
 
-    export VM_INSTANCE_NAME='neo4j-generative-ai-google-cloud'
-    export GCP_PROJECT_NAME=$(gcloud config get-value project)
-    gcloud compute instances create $VM_INSTANCE_NAME \
-        --image-project debian-cloud \
-        --image-family debian-12 \
-        --zone="us-central1-a"
-        
+We've created a comprehensive PowerShell script to set up a new GCP project with all the necessary APIs, permissions, and resources:
 
-Next, login to the new VM instance:
+```powershell
+# Run from PowerShell
+./setup_gcp_project.ps1 -projectId "your-project-id" -billingAccountId "your-billing-account-id" -region "us-central1"
+```
 
-    gcloud compute ssh --zone "us-central1-a" $VM_INSTANCE_NAME --project $GCP_PROJECT_NAME
+This script will:
+- Create a new GCP project
+- Link your billing account
+- Enable required APIs (Vertex AI, Compute Engine, Cloud Storage, etc.)
+- Create service accounts with appropriate roles
+- Create a Cloud Storage bucket for data
+- Set up Secret Manager for Neo4j credentials
+- Configure firewall rules for HTTP access
 
-We're going to be running the application on port 80.  That requires root access, so first:
+### 2. Neo4j AuraDB Setup
 
-    sudo su
+This demo requires a Neo4j instance. We recommend using Neo4j AuraDB:
 
-Then you'll need to install git and clone this repo:
+1. Sign up for [Neo4j AuraDB](https://console.neo4j.io/)
+2. Create a new database instance (Professional or Enterprise tier recommended)
+3. Save your connection details (URI, username, password)
+4. Add these credentials to your environment (see Configuration section below)
 
-    apt install -y git
-    mkdir -p /app
-    cd /app
-    git clone https://github.com/neo4j-partners/neo4j-generative-ai-google-cloud.git
-    cd neo4j-generative-ai-google-cloud/assetmanager
+### 3. Enable Vertex AI API and Models
 
-Login using GCP credentials via the `gcloud` cli or assign Vertex AI API access via Service Account to the Compute Engine
+The bootstrap script enables the required APIs, but ensure you have access to these models:
+- Gemini-2.5-pro-preview-05-06 (latest Gemini 2.5 Pro Preview)
+- Text-embedding-004 (latest Gemini embedding model)
 
-    gcloud auth application-default login
+Note: You may need to request access to the Gemini 2.5 Pro Preview models in your GCP project.
 
-Let's install python & pip first:
+## Configuration
 
-    apt install -y python
-    apt install -y pip
+Create a `.env` file in the `assetmanager` directory with the following environment variables:
 
-Now, let's create a Virtual Environment to isolate our Python environment and activate it
+```env
+# GCP Settings
+GCP_PROJECT_ID=your-project-id
+GCP_LOCATION=us-central1
+GCP_BUCKET_NAME=your-bucket-name
 
-    apt-get install -y python3-venv
-    python3 -m venv /app/venv/genai
-    source /app/venv/genai/bin/activate
+# Model Settings
+LLM_MODEL=gemini-2.5-pro-preview-05-06
+EMBEDDING_MODEL=text-embedding-004
 
-To install Streamlit and other dependencies:
+# GenAI SDK Settings (Optional)
+GOOGLE_GENAI_USE_VERTEXAI=True
 
-    cd ui
-    pip install -r requirements.txt
+# Neo4j Settings
+NEO4J_URI=neo4j+s://your-instance-id.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+NEO4J_DATABASE=neo4j
+```
 
-Check if `streamlit` command is accessible from PATH by running this command:
+## Installation
 
-    streamlit --version
+We use `uv` for package management. To install the project:
 
-If not, you need to add the `streamlit` binary to PATH variable like below:
+```bash
+# Clone the repository
+git clone https://github.com/neo4j-partners/neo4j-generative-ai-google-cloud.git
+cd neo4j-generative-ai-google-cloud/assetmanager
 
-    export PATH="/app/venv/genai/bin:$PATH"
+# Install dependencies using our installation script
+./install_dependencies.ps1
 
-Next up you'll need to create a secrets file for the app to use.  Open the file and edit it:
+# Or use pyproject.toml directly
+uv add -r pyproject.toml
+```
 
-    cd streamlit
-    cd .streamlit
-    cp secrets.toml.example secrets.toml
-    vi secrets.toml
+## Usage
 
-You will now need to edit that file to reflect your credentials. The file has the following variables:
+The application provides several commands to process data, generate embeddings, and run the UI:
 
-    # GCP
-    GCP_PROJECT = "myprojectname" #e.g. neo4jbd
-    GCP_LOCATION = "us-central1" #e.g. us-central1
-    SUMMARY_MODEL = "" #e.g. gemini-1.5-pro-preview-0409
-    CYPHER_MODEL = "" #e.g. gemini-1.5-pro-preview-0409
-    EMBEDDING_MODEL  = "" #e.g. textembedding-gecko@003. Ensure that the same model is provided during the ingestion phases in the `2-text-embedding.ipynb` notebook
-    MULTIMODAL_MODEL = "" #e.g. claude-3-opus@20240229
-    MULTIMODAL_MODEL_LOCATION = "" #e.g. us-east5
-    # NEO4J
-    NEO4J_HOST = "neo4j+s://URL"
-    NEO4J_PORT = "7687"
-    NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "Foo12345678"
-    NEO4J_DB = "neo4j"
+### 1. Processing Form-13 Filings
 
-Now we can run the app with the commands:
+```bash
+uv run python -m src.main process-form13 --input-dir /path/to/filings --output-dir /path/to/output
+```
 
-    cd ..
-    streamlit run Home.py --server.port=80
+### 2. Processing Form-10K Filings and Generating Embeddings
 
-On a GCP VM to run on port 80:
-- Ensure you are a root or has access to run on port 80
-- If you are running `sudo`, you also need to run the `gcloud auth` command above as a sudoer. And ensure that `streamlit` is accessible from the PATH.
-- Ensure that the VM has port 80 open for HTTP access. You might need to open that port or any other via firewall-rules. You can use the [following gcloud command](https://cloud.google.com/sdk/gcloud/reference/compute/firewall-rules/create) to open the port. Make sure you replace with relevant values. You also need to add network tags to your VM before executing this command:
+```bash
+# Download filings
+uv run python -m src.main download-form10k --target-dir /path/to/download
 
-    ```bash
-    gcloud compute firewall-rules create <rule-name> --allow tcp:80 --source-tags=<list-of-your-instances-name-tags> --source-ranges=0.0.0.0/0 --description="<your-description-here>"
-    ```
+# Process filings and generate embeddings
+uv run python -m src.main process-form10k --input-dir /path/to/form10k --output-file embeddings.csv
+
+# Upload embeddings to GCS (optional)
+uv run python -m src.main upload-embeddings --file embeddings.csv --bucket your-bucket-name
+```
+
+### 3. Running the Streamlit UI
+
+```bash
+uv run python -m src.main ui --port 8501
+```
+
+### 4. Running the API Server (Optional)
+
+```bash
+uv run python -m src.main api --host 0.0.0.0 --port 8000
+```
+
+## Deployment Options
+
+### Option 1: Local Development
+
+For local development:
+
+```bash
+uv run python -m src.main ui --port 8501
+```
+
+This will start the Streamlit UI on port 8501, accessible at http://localhost:8501.
+
+### Option 2: Google Compute Engine VM
+
+1. Create a VM instance:
+
+```bash
+gcloud compute instances create neo4j-gemini-app \
+    --image-project debian-cloud \
+    --image-family debian-12 \
+    --zone="us-central1-a" \
+    --tags=http-server \
+    --scopes=cloud-platform
+```
+
+2. SSH into the VM and install required software:
+
+```bash
+gcloud compute ssh --zone "us-central1-a" neo4j-gemini-app
+
+# Install required packages
+sudo apt update
+sudo apt install -y git python3 python3-pip python3-venv
+
+# Clone the repository
+git clone https://github.com/neo4j-partners/neo4j-generative-ai-google-cloud.git
+cd neo4j-generative-ai-google-cloud
+
+# Install uv package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Install dependencies and run the application
+cd assetmanager
+uv add -r pyproject.toml
+
+# Create .env file (see Configuration section)
+nano .env
+
+# Run the application
+uv run python -m src.main ui --port 8080
+```
+
+3. Create a firewall rule to allow HTTP traffic (if not already done by the bootstrap script):
+
+```bash
+gcloud compute firewall-rules create allow-http \
+    --allow tcp:8080 \
+    --target-tags=http-server \
+    --description="Allow HTTP traffic"
+```
+
+### Option 3: Cloud Run (Serverless)
+
+For a serverless deployment, you can use Google Cloud Run:
+
+1. Create a `Dockerfile` in the root directory:
+
+```dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY assetmanager/ ./
+
+RUN pip install --no-cache-dir uv && \
+    uv add -r pyproject.toml
+
+CMD ["python", "-m", "src.main", "ui", "--port", "8080", "--server.address=0.0.0.0"]
+```
+
+2. Build and deploy to Cloud Run:
+
+```bash
+# Build the container
+gcloud builds submit --tag gcr.io/your-project-id/neo4j-generative-ai-app
+
+# Deploy to Cloud Run
+gcloud run deploy neo4j-generative-ai-app \
+    --image gcr.io/your-project-id/neo4j-generative-ai-app \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated
+```
+
+## Architecture
+
+The modernized application uses the following architecture:
+
+1. **Data Processing**:
+   - Entity extraction from SEC EDGAR Form-13 filings using Gemini Pro 2.5
+   - Text embedding generation using Gemini text-embedding-004 model
+   - Data import into Neo4j AuraDB
+
+2. **Knowledge Graph Querying**:
+   - Natural language to Cypher conversion using Gemini Pro 2.5
+   - Neo4j Cypher query execution
+   - Result visualization in Streamlit UI
+
+## Upgrade to Gemini 2.5 Pro Preview
+
+This project now uses Google's latest Gemini 2.5 Pro Preview model and the new Google GenAI SDK. For details on the upgrade and new capabilities, see [GEMINI_25_UPGRADE.md](./GEMINI_25_UPGRADE.md).
+
+Key improvements include:
+- Enhanced reasoning and context understanding
+- System instructions for better control of model behavior
+- Structured output in JSON format
+- Improved multimodal capabilities
+- Unified SDK for both Vertex AI and API key authentication
+
+## Additional Resources
+
+- [Neo4j AuraDB Documentation](https://neo4j.com/docs/aura/auradb/)
+- [Google Cloud Vertex AI Documentation](https://cloud.google.com/vertex-ai/docs)
+- [Google GenAI SDK Documentation](https://ai.google.dev/python/)
+- [Gemini 2.5 Pro Preview Documentation](https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini)
