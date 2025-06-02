@@ -122,14 +122,21 @@ try {
     if ($serviceAccountExists) {
         Write-Host "   Service account $serviceAccountEmail exists" -ForegroundColor Green
         
-        # Check for key file
-        $keyFilePath = ".\$serviceAccountName-key.json"
-        if (Test-Path $keyFilePath) {
-            Write-Host "   Service account key file $keyFilePath exists" -ForegroundColor Green
+        # Check if the service account key file exists
+        $saKeyFile = ".\neo4j-genai-sa-key.json"
+        $parentSaKeyFile = "..\neo4j-genai-sa-key.json"
+
+        if (Test-Path $saKeyFile) {
+            Write-Host "   Service account key file $saKeyFile exists" -ForegroundColor Green
+        } elseif (Test-Path $parentSaKeyFile) {
+            Write-Host "   Service account key file found in parent directory: $parentSaKeyFile" -ForegroundColor Green
+            # Copy the key file to the current directory for the test scripts to use
+            Copy-Item -Path $parentSaKeyFile -Destination $saKeyFile -Force
+            Write-Host "   Copied service account key to current directory for tests" -ForegroundColor Green
         } else {
-            Write-Host "   Service account key file $keyFilePath not found" -ForegroundColor Yellow
+            Write-Host "   Service account key file $saKeyFile not found" -ForegroundColor Yellow
             Write-Host "      Create it with:" -ForegroundColor Yellow
-            Write-Host "      gcloud iam service-accounts keys create $keyFilePath --iam-account=$serviceAccountEmail --project=$PROJECT_ID" -ForegroundColor Yellow
+            Write-Host "      gcloud iam service-accounts keys create $saKeyFile --iam-account=$serviceAccountEmail --project=$PROJECT_ID" -ForegroundColor Yellow
         }
     } else {
         Write-Host "   Service account $serviceAccountEmail does not exist" -ForegroundColor Red
@@ -188,9 +195,21 @@ if ($serviceAccountExists) {
 
 # Echo key .env variables before Python tests
 Write-Host "`n6. Echoing key .env configurations for Python scripts..." -ForegroundColor Green
+
+# Extract all needed variables from .env file
 $llmModelFromEnv = Get-EnvVariable -variableName "LLM_MODEL"
 $thinkingBudgetFromEnv = Get-EnvVariable -variableName "LLM_THINKING_BUDGET"
+
+# Extract Neo4j URI for Python test - make sure to get exactly what's in the .env file
 $neo4jUriFromEnv = Get-EnvVariable -variableName "NEO4J_URI"
+$neo4jUser = Get-EnvVariable -variableName "NEO4J_USER"
+$neo4jPassword = Get-EnvVariable -variableName "NEO4J_PASSWORD"
+
+# Double check that the NEO4J_URI from .env actually has the prefix
+if($neo4jUriFromEnv -and (-not $neo4jUriFromEnv.Contains('://')) -and $neo4jUriFromEnv.Contains('databases.neo4j.io')) {
+    Write-Host "   Adding missing 'neo4j+s://' prefix to Neo4j URI in script" -ForegroundColor Yellow
+    $neo4jUriFromEnv = "neo4j+s://" + $neo4jUriFromEnv
+}
 Write-Host "   - Expected LLM_MODEL: $($llmModelFromEnv)"
 Write-Host "   - Expected LLM_THINKING_BUDGET: $($thinkingBudgetFromEnv)"
 if (-not [string]::IsNullOrEmpty($neo4jUriFromEnv)) {
@@ -200,137 +219,66 @@ if (-not [string]::IsNullOrEmpty($neo4jUriFromEnv)) {
 }
 
 # Test Vertex AI access and Neo4j Connection using Python
-Write-Host "`n7. Testing Vertex AI and Neo4j with Python..." -ForegroundColor Green
-Write-Host "   This will run an embedded Python script to test these services."
+Write-Host "
+7. Testing Vertex AI and Neo4j with Python..." -ForegroundColor Green
+Write-Host "   This will run separate Python scripts to test these services."
 
-$testScript = @"
-import os
-import json
-from dotenv import load_dotenv
-import google.genai as genai
+# Run the Vertex AI test script
+Write-Host "   Running Vertex AI test script..." -ForegroundColor Cyan
+$output = & uv run python test_vertex_ai.py 2>&1
 
-# Load environment variables from .env in the current directory (assetmanager)
-load_dotenv()
-
-# Get environment variables with fallbacks
-PROJECT_ID = os.getenv('GCP_PROJECT_ID', 'neo4j-deployment-new1')
-NEO4J_URI = os.getenv('NEO4J_URI', '')
-NEO4J_USER = os.getenv('NEO4J_USER', 'neo4j')
-NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD', '')
-LLM_MODEL = os.getenv('LLM_MODEL', 'gemini-2.5-pro-preview-05-06')  # Using preferred model
-LLM_THINKING_BUDGET = int(os.getenv('LLM_THINKING_BUDGET', 1024))
-
-print(f"Python: Using GCP_PROJECT_ID: {PROJECT_ID}")
-
-# Vertex AI Test
-print("  --- Vertex AI Test --- ")
-print(f"    Attempting to use LLM Model: {LLM_MODEL}")
-print(f"    With Thinking Budget: {LLM_THINKING_BUDGET}")
-
-try:
-    # Initialize Vertex AI client according to google-genai SDK
-    client = genai.Client(project=PROJECT_ID, location='us-central1', vertexai=True)
-    
-    # Set up generation parameters as a simple dictionary
-    generation_params = {
-        'temperature': 0.1,
-        'max_output_tokens': 1024
-    }
-    
-    # Quick test of LLM with proper API format
-    prompt = "Hello, are you operational?"
-    response = client.generate_content(
-        model=LLM_MODEL,
-        contents=prompt,
-        **generation_params  # Pass parameters directly
-    )
-    
-    # Print response
-    print("    Vertex AI Test Success: Model responded with:")
-    print(f"    {response.text[:100]}...")
-    
-except Exception as e:
-    print(f"    Vertex AI Test ERROR: {str(e)}")
-
-# Neo4j Connection Test
-print("  --- Neo4j Connection Test --- ")
-
-# Validate NEO4J_URI - ensure it's not empty and has a valid scheme
-if not NEO4J_URI or '://' not in NEO4J_URI:
-    print(f"    Neo4j Connection ERROR: Invalid URI format. URI should include a scheme like 'neo4j://', 'bolt://' or 'neo4j+s://'")
-    raise ValueError("Invalid Neo4j URI")
-
-# Only show first 20 chars of URI for security
-uri_display = NEO4J_URI[:20] + '...' if len(NEO4J_URI) > 20 else NEO4J_URI
-print(f"    Attempting to connect to Neo4j at {uri_display} (credentials hidden)")
-
-try:
-    # Try to connect to Neo4j
-    import neo4j
-    driver = neo4j.GraphDatabase.driver(
-        NEO4J_URI,
-        auth=(NEO4J_USER, NEO4J_PASSWORD)
-    )
-    # Test connection with simple query
-    with driver.session() as session:
-        # Simple query to test connection
-        result = session.run("RETURN 'Connected to Neo4j!' as message")
-        message = result.single()["message"]
-        print(f"    Neo4j Test Success: {message}")
-        # Check for Vertex AI Vector Index
-        try:
-            vector_result = session.run("SHOW INDEXES YIELD name, type WHERE type='VECTOR' RETURN name")
-            vector_indexes = [record["name"] for record in vector_result]
-            
-            if vector_indexes:
-                print(f"    Found {len(vector_indexes)} vector indexes: {', '.join(vector_indexes)}")
-            else:
-                print("    No vector indexes found. You may need to create one for embedding search.")
-        except Exception as vector_err:
-            print(f"    Could not check for vector indexes: {vector_err}")
-    driver.close()
-except Exception as e:
-    print(f"   Neo4j Connection ERROR: {e}")
-
-"@
-
-# Save the test script - ensure UTF-8 no BOM encoding for Python compatibility
-$testScript | Out-File -FilePath "test_vertex_ai.py" -Encoding utf8NoBOM
-
-# Run the test script using uv for proper dependency management
-Write-Host "   Running Vertex AI test script..."
-$testResult = & uv run python test_vertex_ai.py
-Remove-Item "test_vertex_ai.py"
-
+# Try to parse the output as JSON
 try {
-    $result = $testResult | ConvertFrom-Json
-    
-    if ($result.success) {
-        Write-Host "   ✅ Successfully connected to Vertex AI" -ForegroundColor Green
-        Write-Host "      Found $($result.models_found) models" -ForegroundColor Green
-        
-        if ($result.gemini_models.Count -gt 0) {
-            Write-Host "      Gemini models available:" -ForegroundColor Green
-            foreach ($model in $result.gemini_models) {
-                Write-Host "        - $model" -ForegroundColor Green
-            }
+    $jsonLine = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+    if ($jsonLine) {
+        $jsonOutput = $jsonLine | ConvertFrom-Json
+        if ($jsonOutput.success) {
+            Write-Host "   ✅ Connected to Vertex AI: $($jsonOutput.message)" -ForegroundColor Green
         } else {
-            Write-Host "      ⚠️ No Gemini models found in your project" -ForegroundColor Yellow
-            Write-Host "         Request access to Gemini models in your GCP console" -ForegroundColor Yellow
-        }
-        
-        if ($result.test_generation) {
-            Write-Host "      Test generation successful: '$($result.test_generation)'" -ForegroundColor Green
-        } elseif ($result.test_generation_error) {
-            Write-Host "      ⚠️ Test generation failed: $($result.test_generation_error)" -ForegroundColor Yellow
+            Write-Host "   ❌ Failed to connect to Vertex AI: $($jsonOutput.message)" -ForegroundColor Red
         }
     } else {
-        Write-Host "   ❌ Failed to connect to Vertex AI: $($result.error)" -ForegroundColor Red
+        Write-Host "   ❌ No JSON output found from Vertex AI test" -ForegroundColor Red
+        Write-Host "   Raw output: $output" -ForegroundColor Yellow
     }
 } catch {
-    Write-Host "   ❌ Failed to parse test results: $_" -ForegroundColor Red
-    Write-Host "   Raw output: $testResult" -ForegroundColor Red
+    Write-Host "   ❌ Failed to parse Vertex AI test results: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   Raw output: $output" -ForegroundColor Yellow
 }
+
+# Run the Neo4j connection test script
+Write-Host "
+   Running Neo4j connection test script..." -ForegroundColor Cyan
+$output = & uv run python test_neo4j_connection.py 2>&1
+
+# Try to parse the output as JSON
+try {
+    $jsonLine = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+    if ($jsonLine) {
+        $jsonOutput = $jsonLine | ConvertFrom-Json
+        if ($jsonOutput.success) {
+            Write-Host "   ✅ Connected to Neo4j: $($jsonOutput.message)" -ForegroundColor Green
+            if ($jsonOutput.vector_indexes -and $jsonOutput.vector_indexes.Count -gt 0) {
+                Write-Host "   ✅ Found vector indexes: $($jsonOutput.vector_indexes -join ', ')" -ForegroundColor Green
+            } else {
+                Write-Host "   ⚠️ No vector indexes found. You may need to create one for embedding search." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "   ❌ Failed to connect to Neo4j: $($jsonOutput.error)" -ForegroundColor Red
+            if ($jsonOutput.resolution) {
+                Write-Host "      Resolution: $($jsonOutput.resolution)" -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Host "   ❌ No JSON output found from Neo4j test" -ForegroundColor Red
+        Write-Host "   Raw output: $output" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "   ❌ Failed to parse Neo4j test results: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   Raw output: $output" -ForegroundColor Yellow
+}
+
+# Done with Vertex AI and Neo4j tests - all testing is now handled by the standalone scripts
 
 # Create .env file if it doesn't exist
 Write-Host "`n7. Checking for .env file..." -ForegroundColor Green
@@ -345,21 +293,74 @@ if (-not (Test-Path ".env")) {
     }
 }
 
-# Run full verification script
-Write-Host "`n8. Running comprehensive verification script..." -ForegroundColor Green
+# Run comprehensive verification by using our standalone test scripts
+Write-Host "`n8. Running comprehensive verification..." -ForegroundColor Green
 
-# Save the Python script to a file and run it with uv run python
-$testFilePath = "verify_setup.py"
-$testScript | Out-File -FilePath $testFilePath -Encoding utf8NoBOM
-Write-Host "   Saved test script to $testFilePath"
+# First verify LLM model in .env file
+Write-Host "   Checking LLM model in .env file..." -ForegroundColor Cyan
+$envContent = Get-Content .env -ErrorAction SilentlyContinue
+$llmModelLine = $envContent | Where-Object { $_ -match '^LLM_MODEL=' }
 
+if ($llmModelLine) {
+    $llmModel = $llmModelLine -replace '^LLM_MODEL=', ''
+    Write-Host "   LLM model found in .env: $llmModel" -ForegroundColor Green
+    
+    # Check if it matches our preferred model
+    if ($llmModel -eq "gemini-2.5-pro-preview-05-06") {
+        Write-Host "   ✅ Using preferred model: gemini-2.5-pro-preview-05-06" -ForegroundColor Green
+    } else {
+        Write-Host "   ⚠️ Current model ($llmModel) differs from preferred model (gemini-2.5-pro-preview-05-06)" -ForegroundColor Yellow
+        Write-Host "      Consider updating LLM_MODEL in .env file for optimal performance" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "   ❌ LLM_MODEL not found in .env file" -ForegroundColor Red
+    Write-Host "      Add LLM_MODEL=gemini-2.5-pro-preview-05-06 to your .env file" -ForegroundColor Yellow
+}
+
+# Run final environment verification with our standalone scripts
+Write-Host "
+   Running final environment verification..." -ForegroundColor Cyan
+
+# Run Vertex AI test one more time to verify
+Write-Host "   Verifying Vertex AI connection..." -ForegroundColor Cyan
+$output = & uv run python test_vertex_ai.py 2>&1
+
+# Try to parse the output as JSON
 try {
-    Write-Host "   Running Python verification script..."
-    & uv run python $testFilePath
-    Write-Host "   Python verification script completed." -ForegroundColor Green
+    $jsonLine = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+    if ($jsonLine) {
+        $jsonOutput = $jsonLine | ConvertFrom-Json
+        if ($jsonOutput.success) {
+            Write-Host "   ✅ Final Vertex AI verification: Success" -ForegroundColor Green
+        } else {
+            Write-Host "   ❌ Final Vertex AI verification failed: $($jsonOutput.message)" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "   ❌ No JSON output found from final Vertex AI test" -ForegroundColor Red
+    }
 } catch {
-    Write-Host "   Failed to run Python verification script: $_" -ForegroundColor Red
-    Write-Host "      Make sure Python is installed and required packages are available (python-dotenv, google-genai, neo4j)" -ForegroundColor Yellow
+    Write-Host "   ❌ Failed to parse final Vertex AI test results: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Run Neo4j connection test one more time to verify
+Write-Host "   Verifying Neo4j connection..." -ForegroundColor Cyan
+$output = & uv run python test_neo4j_connection.py 2>&1
+
+# Try to parse the output as JSON
+try {
+    $jsonLine = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+    if ($jsonLine) {
+        $jsonOutput = $jsonLine | ConvertFrom-Json
+        if ($jsonOutput.success) {
+            Write-Host "   ✅ Final Neo4j verification: Success" -ForegroundColor Green
+        } else {
+            Write-Host "   ❌ Final Neo4j verification failed: $($jsonOutput.error)" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "   ❌ No JSON output found from final Neo4j test" -ForegroundColor Red
+    }
+} catch {
+    Write-Host "   ❌ Failed to parse final Neo4j test results: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 Write-Host "`nBootstrap verification complete!" -ForegroundColor Green
